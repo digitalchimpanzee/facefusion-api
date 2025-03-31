@@ -14,8 +14,6 @@ from appwrite.input_file import InputFile
 from appwrite.id import ID
 from appwrite.exception import AppwriteException
 
-# No longer importing facefusion directly
-
 load_dotenv()
 
 FLASK_HOST = os.getenv('FLASK_RUN_HOST', '0.0.0.0')
@@ -53,7 +51,6 @@ SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Define path to facefusion script (adjust if necessary)
 FACEFUSION_SCRIPT_PATH = BASE_DIR / "facefusion.py"
 
 app = Flask(__name__)
@@ -93,7 +90,6 @@ def get_file_extension(filename):
 
 @app.route('/v1/swap-faces', methods=['POST'])
 def swap_faces_endpoint():
-    # Check if the script exists early
     if not FACEFUSION_SCRIPT_PATH.is_file():
         print(f"Error: Facefusion script not found at {FACEFUSION_SCRIPT_PATH}", file=sys.stderr)
         return jsonify({"error": "Server configuration error: Processing script missing."}), 500
@@ -212,20 +208,17 @@ def swap_faces_endpoint():
              update_job_status(job_id, 'failed')
              return jsonify({"error": "Failed to save media files locally.", "details": str(e)}), 500
 
-        # --- Execute FaceFusion via Command Line ---
         output_filename = f"result_{job_id}_{uuid.uuid4().hex}{target_ext}"
         output_path = OUTPUT_DIR / output_filename
 
-        # Construct the command arguments
         command = [
-            sys.executable,             # Use the same python interpreter
-            str(FACEFUSION_SCRIPT_PATH),# Path to the script
-            'headless-run',             # Subcommand
-            '-s', str(source_path),     # Source file path
-            '-t', str(target_path),     # Target file path
-            '-o', str(output_path)      # Output file path
+            sys.executable,
+            str(FACEFUSION_SCRIPT_PATH),
+            'headless-run',
+            '-s', str(source_path),
+            '-t', str(target_path),
+            '-o', str(output_path)
             # Add any other necessary facefusion args here
-            # E.g., '--face-detector-model', 'retinaface', ...
         ]
 
         print(f"Executing command: {' '.join(command)}")
@@ -233,18 +226,15 @@ def swap_faces_endpoint():
             command,
             capture_output=True,
             text=True,
-            check=False, # Check manually
+            check=False,
             encoding='utf-8'
         )
 
-        # --- Handle Command Result ---
-        stdout_lower = process.stdout.lower() # For case-insensitive check
-
-        print("stdout:", stdout_lower)
-
-        if process.returncode == 0 and output_path.exists() and "succeed" in stdout_lower:
-            print("Face swapping process completed successfully.")
-            print(f"  stdout:\n{process.stdout}") # Log full stdout on success too
+        # --- Updated Handle Command Result ---
+        # Success check: return code 0 AND output file exists
+        if process.returncode == 0 and output_path.exists():
+            print("Face swapping process completed successfully (Return Code 0, Output File Exists).")
+            print(f"  stdout:\n{process.stdout}")
 
             print(f"Uploading result file {output_path} to Appwrite Storage (Bucket: {APPWRITE_RESULT_BUCKET_ID})...")
             try:
@@ -274,26 +264,29 @@ def swap_faces_endpoint():
                 return jsonify({"error": "Failed to upload result file.", "details": str(e)}), 500
 
         else:
-            # Handle command failure
+            # Handle command failure based on return code or missing output file
             error_msg = f"Face swapping process failed."
             details = []
             if process.returncode != 0:
                 details.append(f"Return code: {process.returncode}")
             if not output_path.exists():
+                # This check is important if the process might return 0 but still fail to create the file
                 details.append("Output file not created.")
-            if "succeed in" not in stdout_lower:
-                 details.append("Success message not found in output.")
 
-            error_msg += f" ({'; '.join(details)})"
+            if details:
+                 error_msg += f" ({'; '.join(details)})"
+            else:
+                # Should ideally not happen if the condition above failed, but as a fallback
+                error_msg += " (Unknown reason)"
+
             print(error_msg, file=sys.stderr)
 
             stderr_output = process.stderr or "No stderr output."
-            stdout_output = process.stdout or "No stdout output."
+            stdout_output = process.stdout or "No stdout output." # Log stdout even on failure
             print(f"  stderr:\n{stderr_output}", file=sys.stderr)
-            print(f"  stdout:\n{stdout_output}", file=sys.stderr) # Log stdout on failure too
+            print(f"  stdout:\n{stdout_output}", file=sys.stderr)
 
             update_job_status(job_id, 'failed')
-            # Return stderr as primary detail
             return jsonify({ "status": "error", "jobId": job_id, "message": error_msg, "details": stderr_output }), 500
 
     except Exception as e:
