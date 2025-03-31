@@ -239,7 +239,10 @@ def swap_faces_endpoint():
 
         # --- Handle Command Result ---
         stdout_lower = process.stdout.lower() # For case-insensitive check
-        if process.returncode == 0 and output_path.exists() and "succeed in" in stdout_lower:
+
+        print("stdout:", stdout_lower)
+
+        if process.returncode == 0 and output_path.exists() and "succeed" in stdout_lower:
             print("Face swapping process completed successfully.")
             print(f"  stdout:\n{process.stdout}") # Log full stdout on success too
 
