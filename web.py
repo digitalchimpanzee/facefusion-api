@@ -112,14 +112,9 @@ def swap_faces_endpoint():
 
     print(f"\n--- Received job request: {job_id} ---")
 
-    source_media_id = None
-    target_media_id = None
     source_path = None
     target_path = None
     output_path = None
-    job_doc = None
-    source_file_meta = None
-    target_file_meta = None
 
     try:
         print(f"Fetching job document for {job_id}...")
@@ -238,7 +233,7 @@ def swap_faces_endpoint():
 
             print(f"Uploading result file {output_path} to Appwrite Storage (Bucket: {APPWRITE_RESULT_BUCKET_ID})...")
             try:
-                input_file = InputFile.from_path(str(output_path), filename=output_filename)
+                input_file = InputFile.from_path(str(output_path))
                 upload_response = storage.create_file(
                     bucket_id=APPWRITE_RESULT_BUCKET_ID,
                     file_id=ID.unique(),
