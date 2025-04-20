@@ -63,11 +63,11 @@ client.set_key(APPWRITE_API_KEY)
 databases = Databases(client)
 storage = Storage(client)
 
-def update_job_status(job_id, status, result_media_id=None):
+def update_job_status(job_id, status, result_id=None):
     try:
         data = {'status': status}
-        if result_media_id:
-            data['resultMediaId'] = result_media_id
+        if result_id:
+            data['resultId'] = result_id
 
         databases.update_document(
             database_id=APPWRITE_DATABASE_ID,
@@ -112,8 +112,8 @@ def swap_faces_endpoint():
 
     print(f"\n--- Received job request: {job_id} ---")
 
-    source_path = None
-    target_path = None
+    face_path = None
+    media_path = None
     output_path = None
 
     try:
@@ -123,16 +123,16 @@ def swap_faces_endpoint():
             collection_id=APPWRITE_JOBS_COLLECTION_ID,
             document_id=job_id
         )
-        source_media_id = job_doc.get('sourceMediaId')
-        target_media_id = job_doc.get('targetMediaId')
+        face_id = job_doc.get('faceId')
+        media_id = job_doc.get('mediaId')
 
-        if not source_media_id or not target_media_id:
-            error_msg = "Missing sourceMediaId or targetMediaId in job document"
+        if not face_id or not media_id:
+            error_msg = "Missing faceId or mediaId in job document"
             print(f"Error for job {job_id}: {error_msg}", file=sys.stderr)
             update_job_status(job_id, 'failed')
             return jsonify({"error": error_msg}), 400
 
-        print(f"  Job document found. Source ID: {source_media_id}, Target ID: {target_media_id}")
+        print(f"  Job document found. Source ID: {face_id}, Target ID: {media_id}")
 
     except AppwriteException as e:
         if e.code == 404:
@@ -154,8 +154,8 @@ def swap_faces_endpoint():
     try:
         print("Fetching file metadata...")
         try:
-            source_file_meta = storage.get_file(APPWRITE_SOURCE_BUCKET_ID, source_media_id)
-            target_file_meta = storage.get_file(APPWRITE_TARGET_BUCKET_ID, target_media_id)
+            source_file_meta = storage.get_file(APPWRITE_SOURCE_BUCKET_ID, face_id)
+            target_file_meta = storage.get_file(APPWRITE_TARGET_BUCKET_ID, media_id)
             source_filename_original = source_file_meta['name']
             target_filename_original = target_file_meta['name']
             print(f"  Source original name: {source_filename_original}")
@@ -176,19 +176,19 @@ def swap_faces_endpoint():
 
         source_filename_local = f"{job_id}_source_{uuid.uuid4().hex}{source_ext}"
         target_filename_local = f"{job_id}_target_{uuid.uuid4().hex}{target_ext}"
-        source_path = SOURCE_DIR / source_filename_local
-        target_path = TARGET_DIR / target_filename_local
+        face_path = SOURCE_DIR / source_filename_local
+        media_path = TARGET_DIR / target_filename_local
 
         try:
-            print(f"  Downloading Source (Bucket: {APPWRITE_SOURCE_BUCKET_ID}, File: {source_media_id})")
-            source_bytes = storage.get_file_download(APPWRITE_SOURCE_BUCKET_ID, source_media_id)
-            with open(source_path, 'wb') as f: f.write(source_bytes)
-            print(f"    Downloaded source to: {source_path}")
+            print(f"  Downloading Source (Bucket: {APPWRITE_SOURCE_BUCKET_ID}, File: {face_id})")
+            source_bytes = storage.get_file_download(APPWRITE_SOURCE_BUCKET_ID, face_id)
+            with open(face_path, 'wb') as f: f.write(source_bytes)
+            print(f"    Downloaded source to: {face_path}")
 
-            print(f"  Downloading Target (Bucket: {APPWRITE_TARGET_BUCKET_ID}, File: {target_media_id})")
-            target_bytes = storage.get_file_download(APPWRITE_TARGET_BUCKET_ID, target_media_id)
-            with open(target_path, 'wb') as f: f.write(target_bytes)
-            print(f"    Downloaded target to: {target_path}")
+            print(f"  Downloading Target (Bucket: {APPWRITE_TARGET_BUCKET_ID}, File: {media_id})")
+            target_bytes = storage.get_file_download(APPWRITE_TARGET_BUCKET_ID, media_id)
+            with open(media_path, 'wb') as f: f.write(target_bytes)
+            print(f"    Downloaded target to: {media_path}")
 
         except AppwriteException as e:
             error_msg = f"Failed to download files from Appwrite Storage. Error: {e}"
@@ -210,8 +210,8 @@ def swap_faces_endpoint():
             sys.executable,
             str(FACEFUSION_SCRIPT_PATH),
             'headless-run',
-            '-s', str(source_path),
-            '-t', str(target_path),
+            '-s', str(face_path),
+            '-t', str(media_path),
             '-o', str(output_path)
             # Add any other necessary facefusion args here
         ]
@@ -239,11 +239,11 @@ def swap_faces_endpoint():
                     file_id=ID.unique(),
                     file=input_file,
                 )
-                result_media_id = upload_response['$id']
-                print(f"  Upload successful. Result Media ID: {result_media_id}")
+                result_id = upload_response['$id']
+                print(f"  Upload successful. Result ID: {result_id}")
 
-                update_job_status(job_id, 'completed', result_media_id=result_media_id)
-                return jsonify({ "status": "success", "jobId": job_id, "resultMediaId": result_media_id }), 200
+                update_job_status(job_id, 'completed', result_id=result_id)
+                return jsonify({ "status": "success", "jobId": job_id, "resultId": result_id }), 200
 
             except AppwriteException as e:
                 error_msg = f"Failed to upload result file to Appwrite Storage. Error: {e}"
@@ -293,7 +293,7 @@ def swap_faces_endpoint():
 
     finally:
         print(f"Cleaning up local files for job {job_id}...")
-        files_to_delete = [source_path, target_path, output_path]
+        files_to_delete = [face_path, media_path, output_path]
         for file_path in files_to_delete:
              if file_path and file_path.exists():
                 try:
