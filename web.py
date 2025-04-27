@@ -231,6 +231,8 @@ def swap_faces_endpoint():
         output_filename = f"result_{job_id}_{uuid.uuid4().hex}{target_ext}"
         output_path = OUTPUT_DIR / output_filename
 
+        preview_path = None
+
         command = [
             sys.executable,
             str(FACEFUSION_SCRIPT_PATH),
@@ -269,6 +271,7 @@ def swap_faces_endpoint():
                 
                 # Check if the result is a video and create a GIF preview
                 preview_id = None
+
                 if is_video_file(output_path) and shutil.which('ffmpeg'):
                     print("Video result detected. Creating GIF preview...")
                     preview_path = OUTPUT_DIR / f"preview_{job_id}_{uuid.uuid4().hex}.gif"
@@ -283,8 +286,7 @@ def swap_faces_endpoint():
                             preview_id = preview_upload['$id']
                             print(f"  GIF preview upload successful. Preview ID: {preview_id}")
                             
-                            # Add the preview path to cleanup list
-                            files_to_delete.append(preview_path)
+                            # Don't add to files_to_delete here - it's not in scope
                         except Exception as e:
                             print(f"Warning: Failed to upload GIF preview: {e}", file=sys.stderr)
                     else:
@@ -353,6 +355,9 @@ def swap_faces_endpoint():
     finally:
         print(f"Cleaning up local files for job {job_id}...")
         files_to_delete = [face_path, media_path, output_path]
+        # Add preview_path to cleanup list if it was created
+        if 'preview_path' in locals() and preview_path and preview_path.exists():
+            files_to_delete.append(preview_path)
         for file_path in files_to_delete:
              if file_path and file_path.exists():
                 try:
