@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import uuid
+import shutil
 from pathlib import Path
 import traceback # For detailed error logging
 
@@ -87,6 +88,30 @@ def get_file_extension(filename):
     if not filename or '.' not in filename:
         return ""
     return os.path.splitext(filename)[1].lower()
+
+def is_video_file(file_path):
+    """Check if the file is a video file based on extension"""
+    video_extensions = ['.mp4', '.mov']
+    return get_file_extension(str(file_path)) in video_extensions
+
+def create_gif_preview(video_path, output_path, fps=10, width=320):
+    """Create a GIF preview from a video file using ffmpeg"""
+    command = [
+        'ffmpeg',
+        '-i', str(video_path),
+        '-vf', f'fps={fps},scale={width}:-1:flags=lanczos',
+        '-y',
+        str(output_path)
+    ]
+    
+    process = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding='utf-8'
+    )
+    return process.returncode == 0
 
 @app.route('/v1/swap-faces', methods=['POST'])
 def swap_faces_endpoint():
@@ -241,9 +266,43 @@ def swap_faces_endpoint():
                 )
                 result_id = upload_response['$id']
                 print(f"  Upload successful. Result ID: {result_id}")
-
-                update_job_status(job_id, 'completed', result_id=result_id)
-                return jsonify({ "status": "success", "jobId": job_id, "resultId": result_id }), 200
+                
+                # Check if the result is a video and create a GIF preview
+                preview_id = None
+                if is_video_file(output_path) and shutil.which('ffmpeg'):
+                    print("Video result detected. Creating GIF preview...")
+                    preview_path = OUTPUT_DIR / f"preview_{job_id}_{uuid.uuid4().hex}.gif"
+                    if create_gif_preview(output_path, preview_path):
+                        try:
+                            preview_input_file = InputFile.from_path(str(preview_path))
+                            preview_upload = storage.create_file(
+                                bucket_id=APPWRITE_RESULT_BUCKET_ID,
+                                file_id=ID.unique(),
+                                file=preview_input_file,
+                            )
+                            preview_id = preview_upload['$id']
+                            print(f"  GIF preview upload successful. Preview ID: {preview_id}")
+                            
+                            # Add the preview path to cleanup list
+                            files_to_delete.append(preview_path)
+                        except Exception as e:
+                            print(f"Warning: Failed to upload GIF preview: {e}", file=sys.stderr)
+                    else:
+                        print("Warning: Failed to create GIF preview", file=sys.stderr)
+                
+                update_data = {'status': 'completed', 'resultId': result_id}
+                if preview_id:
+                    update_data['mediaPreviewId'] = preview_id
+                
+                # Update job with result ID and optional preview ID
+                databases.update_document(
+                    database_id=APPWRITE_DATABASE_ID,
+                    collection_id=APPWRITE_JOBS_COLLECTION_ID,
+                    document_id=job_id,
+                    data=update_data
+                )
+                
+                return jsonify({ "status": "success", "jobId": job_id, "resultId": result_id, "previewId": preview_id }), 200
 
             except AppwriteException as e:
                 error_msg = f"Failed to upload result file to Appwrite Storage. Error: {e}"
